@@ -1,0 +1,281 @@
+---
+title: "Bayesian Federated Learning for VA Reproducible Examples"
+author: "Yu (Zoey) Zhu"
+date: "2025-05-09"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  message = FALSE,  
+  warning = FALSE, 
+  echo = TRUE,      
+  results = 'markup' 
+)
+```
+
+
+```{r}
+library(rstan)
+library(caret)
+library(LCVA)
+```
+
+
+This supplementary R Markdown file provides example code for fitting Local and Bayesian Federated Learning (BFL) models under three different label shift settings: (1) No within-target label shift, (2) Mild within-target label shift, and (3) Severe within-target label shift. The goal is to evaluate model performance on a given target domain (e.g., "AP") by computing both the Top Cause Accuracy and the Cause-Specific Mortality Fraction (CSMF) Accuracy.
+
+The "execute_balance_local_fit" and "execute_unbalance_local_fit" functions generate simulated data for each domain, fit the local LCVA models for each domain, and extract the corresponding posterior phi for subsequent BFL models. These functions also report the local model’s CSMF and top-cause accuracy for the target site.
+
+The "run_BFL_balance_model" and "run_BFL_unbalance_model" functions fit various BFL models and provide both CSMF and top-cause accuracy predictions for the target site. Additionally, the outputs also include CSMF estimates and individual-level cause predictions for the unlabeled samples.
+
+
+## Setup
+
+We consider the target domain is "AP" and have 20% labeled data in the target domain (label shift case (1) & (2)).  
+We apply K = 5 for the latent class when fitting LCVA base models.
+
+```{r}
+test_site_balance <- "AP"
+test_site_unbalance <- "AP"
+sites <- c("Mexico", "AP", "Bohol", "Dar", "Pemba", "UP")
+K <- 5
+miss_prop <- 0.8
+model_types_balance <- c("domain", "partial", "base", "mix")
+model_types_unbalance <- c("domain", "partial", "mix")
+```
+
+## Case I: No within-target label shift
+
+We evaluate the local models (local-self and local-avg), and BFL models (domain, partial, base, mix) in the 'no within-target label shift' case.
+
+```{r balance-sources}
+source("execute_balance_local_fit.R")
+source("run_BFL_model.R")
+source("execute_balance_domain.R")
+source("execute_balance_partial.R")
+source("execute_balance_base.R")
+source("execute_balance_mix.R")
+```
+
+### Local Fit 
+
+```{r balance-run}
+local_res_balance <- execute_balance_local_fit(
+  test_site = test_site_balance,
+  sites = sites,
+  K = K,
+  miss_prop = miss_prop
+)
+
+posterior_phi_full <- local_res_balance$posterior_phi_full
+sim_data_filtered_list <- local_res_balance$sim_data_filtered_list
+LCVA_local_model_test_obs_fit <- local_res_balance$LCVA_local_model_test_obs_fit
+```
+
+
+```{r}
+# CSMF ACC
+cat("Case I : Local-self :", local_res_balance$csmf_acc_local[test_site_balance], "\n")
+cat("Case I : Local-avg :", 
+    mean(local_res_balance$csmf_acc_local[names(local_res_balance$csmf_acc_local) != test_site_balance]), "\n")
+
+# Top Cause ACC
+cat("Case I : Local-self :", local_res_balance$acc_local[test_site_balance], "\n")
+cat("Case I : Local-avg :", 
+    mean(local_res_balance$acc_local[names(local_res_balance$acc_local) != test_site_balance]), "\n")
+```
+
+### BFL Fit 
+
+```{r}
+BFL_results_balance <- list()
+
+for (model_type in model_types_balance) {
+  BFL_results_balance[[model_type]] <- run_BFL_balance_model(
+    model_type = model_type,
+    test_site = test_site_balance,
+    sites = sites,
+    sim_data_filtered_list = sim_data_filtered_list,
+    posterior_phi_full = posterior_phi_full,
+    LCVA_local_model_test_obs_fit = LCVA_local_model_test_obs_fit
+  )
+}
+
+```
+
+```{r}
+# CSMF ACC
+for (model_type in model_types_balance) {
+   cat("Case I : BFL-", model_type, ":", BFL_results_balance[[model_type]]$csmf_acc, "\n")
+}
+
+
+# Top Cause ACC
+for (model_type in model_types_balance) {
+  cat("Case I : BFL-", model_type, ":", BFL_results_balance[[model_type]]$acc, "\n")
+}
+```
+
+```{r}
+# example of CSMF estimation from BFL-domain
+BFL_results_balance[["domain"]]$csmf
+```
+
+```{r}
+# example of individual prediction for the unlabeled sample from BFL-domain (first 10 samples)
+BFL_results_balance[["domain"]]$cause_pred[1:10]
+```
+
+
+## Case II: Mild within-target label shift
+
+We evaluate the local models (local-self and local-avg), and BFL models (domain, partial, mix) in the 'mild within-target label shift' case.
+
+```{r unbalance-sources}
+source("execute_unbalance_local_fit.R")
+source("run_BFL_model.R")
+source("execute_unbalance_domain.R")
+source("execute_unbalance_partial.R")
+source("execute_unbalance_mix.R")
+```
+
+```{r unbalance-run}
+unbalanced_cases <- c("MILD", "SEVERE")
+```
+
+### Local Fit 
+
+```{r}
+case = unbalanced_cases[1]
+cat("Running Label Shift Case:", case, "\n")
+
+local_res_unbalance <- execute_unbalance_local_fit(
+    test_site = test_site_unbalance,
+    sites = sites,
+    K = K,
+    miss_prop = miss_prop,
+    unbalanced_case = case
+  )
+```
+
+
+```{r}
+# CSMF ACC
+cat("Case II : Local-self :", local_res_unbalance$csmf_acc_local[test_site_unbalance], "\n")
+cat("Case II : Local-avg :", 
+    mean(local_res_unbalance$csmf_acc_local[names(local_res_unbalance$csmf_acc_local) != test_site_unbalance]), "\n")
+
+
+
+# Top Cause ACC
+cat("Case II : Local-self :", local_res_unbalance$acc_local[test_site_unbalance], "\n")
+cat("Case II : Local-avg :", 
+    mean(local_res_unbalance$acc_local[names(local_res_unbalance$acc_local) != test_site_unbalance]), "\n")
+```
+
+
+### BFL Fit 
+
+```{r}
+  BFL_results_unbalance <- list()
+
+  for (model_type in model_types_unbalance) {
+    BFL_results_unbalance[[model_type]] <- run_BFL_unbalance_model(
+      model_type = model_type,
+      test_site = test_site_unbalance,
+      sites = sites,
+      sim_data_filtered_list = local_res_unbalance$sim_data_filtered_list,
+      sim_data_target_domain_list = local_res_unbalance$sim_data_target_domain_list,
+      posterior_phi_full = local_res_unbalance$posterior_phi_full,
+      LCVA_local_model_test_obs_fit = local_res_unbalance$LCVA_local_model_test_obs_fit
+    )
+  }
+
+```
+
+
+```{r}
+# CSMF ACC
+for (model_type in model_types_unbalance) {
+   cat("Case II : BFL-", model_type, ":", BFL_results_unbalance[[model_type]]$csmf_acc, "\n")
+}
+
+
+# Top Cause ACC
+for (model_type in model_types_unbalance) {
+  cat("Case II : BFL-", model_type, ":", BFL_results_unbalance[[model_type]]$acc, "\n")
+}
+```
+
+
+
+## Case III: Severe within-target label shift
+
+We evaluate the local models (local-self and local-avg), and BFL models (domain, partial, mix) in the 'severe within-target label shift' case.
+
+
+### Local Fit 
+
+```{r}
+case = unbalanced_cases[2]
+cat("Running Label Shift Case:", case, "\n")
+
+local_res_unbalance <- execute_unbalance_local_fit(
+    test_site = test_site_unbalance,
+    sites = sites,
+    K = K,
+    miss_prop = miss_prop,
+    unbalanced_case = case
+  )
+```
+
+```{r}
+# CSMF ACC
+cat("Case III : Local-self :", local_res_unbalance$csmf_acc_local[test_site_unbalance], "\n")
+cat("Case III : Local-avg :", 
+    mean(local_res_unbalance$csmf_acc_local[names(local_res_unbalance$csmf_acc_local) != test_site_unbalance]), "\n")
+
+
+
+# Top Cause ACC
+cat("Case III : Local-self :", local_res_unbalance$acc_local[test_site_unbalance], "\n")
+cat("Case III : Local-avg :", 
+    mean(local_res_unbalance$acc_local[names(local_res_unbalance$acc_local) != test_site_unbalance]), "\n")
+```
+
+### BFL Fit 
+
+```{r}
+  BFL_results_unbalance <- list()
+
+  for (model_type in model_types_unbalance) {
+    BFL_results_unbalance[[model_type]] <- run_BFL_unbalance_model(
+      model_type = model_type,
+      test_site = test_site_unbalance,
+      sites = sites,
+      sim_data_filtered_list = local_res_unbalance$sim_data_filtered_list,
+      sim_data_target_domain_list = local_res_unbalance$sim_data_target_domain_list,
+      posterior_phi_full = local_res_unbalance$posterior_phi_full,
+      LCVA_local_model_test_obs_fit = local_res_unbalance$LCVA_local_model_test_obs_fit
+    )
+  }
+
+```
+
+
+```{r}
+# CSMF ACC
+for (model_type in model_types_unbalance) {
+   cat("Case III : BFL-", model_type, ":", BFL_results_unbalance[[model_type]]$csmf_acc, "\n")
+}
+
+
+# Top Cause ACC
+for (model_type in model_types_unbalance) {
+  cat("Case III : BFL-", model_type, ":", BFL_results_unbalance[[model_type]]$acc, "\n")
+}
+```
+
+
